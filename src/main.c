@@ -184,7 +184,7 @@ void sendDistance(int dist){
     sprintf(payload, "distance,location=indoor mm=%d.0", dist);
     ESP_LOGI(TAG, "%s", payload);
     vTaskDelay(1);
-    esp_http_client_config_t conf = {   .url = "http://10.0.0.6:8086/api/v2/write?org=zuhause&bucket=test",
+    esp_http_client_config_t conf = {   .url = INFLUX_API_URL,
                                         .port = 8086,
                                         .method = HTTP_METHOD_POST,
                                         .auth_type = HTTP_AUTH_TYPE_NONE,
