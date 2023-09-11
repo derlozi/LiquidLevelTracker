@@ -16,8 +16,10 @@
 #define TRIGPIN_MASK GPIO_SEL_26
 #define ECHOPIN GPIO_NUM_25
 #define ECHOPIN_MASK GPIO_SEL_25
+#define SWITCHPIN GPIO_NUM_27
+#define SWITCHPIN_MASK GPIO_SEL_27
 
-
+#define DEEPSLEEPTIME 5*1000000
 
 static const char* TAG = "Main";
 volatile uint32_t distance;
@@ -58,7 +60,6 @@ void echo_timeout_isr_callback()
     timer_pause(TIMER_GROUP_0, TIMER_1);
     timer_set_counter_value(TIMER_GROUP_0, TIMER_1, 0);
     echoTimeout = true;
-    ESP_LOGI(TAG, "Echo Timeout");
 }
 
 esp_err_t _http_event_handler(esp_http_client_event_t *evt)
@@ -71,16 +72,23 @@ static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_b
 {
     if(event_id == WIFI_EVENT_STA_START)
     {
-    ESP_LOGI(TAG, "WiFi Connecting...");
+        ESP_LOGI(TAG, "WiFi Connecting...");
     }
     else if (event_id == WIFI_EVENT_STA_CONNECTED)
     {
-    ESP_LOGI(TAG, "WiFi Connected");
+        ESP_LOGI(TAG, "WiFi Connected");
     }
     else if (event_id == IP_EVENT_STA_GOT_IP)
     {
-    ESP_LOGI(TAG, "Sta got IP");
-    networkConnection = true;
+        ESP_LOGI(TAG, "Sta got IP");
+        networkConnection = true;
+    }
+    else if (event_id == WIFI_EVENT_STA_DISCONNECTED)
+    {
+
+        ESP_LOGI(TAG, "Sta disconnected"); 
+        esp_sleep_enable_timer_wakeup(DEEPSLEEPTIME);
+        esp_deep_sleep_start();
     }
 }
 
@@ -102,7 +110,13 @@ void pin_init()
     conf.pull_up_en = GPIO_PULLUP_DISABLE;
     conf.intr_type = GPIO_INTR_ANYEDGE;
     gpio_config(&conf);
-
+    //set defined pin as output, to switch ultrasonic sensor on when needed, to save energy when in deepsleep
+    conf.pin_bit_mask = SWITCHPIN_MASK;
+    conf.mode = GPIO_MODE_OUTPUT;
+    conf.pull_down_en = GPIO_PULLDOWN_ENABLE;//Enable pulldown to disable sensor by default
+    conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    conf.intr_type = GPIO_INTR_DISABLE;
+    gpio_config(&conf);
     //interrupt conf
     ESP_ERROR_CHECK(gpio_install_isr_service(0));
     ESP_ERROR_CHECK(gpio_isr_handler_add(ECHOPIN, echoMeasurement_isr_callback, NULL));
@@ -188,9 +202,11 @@ uint16_t getDistance()
     
     echoReceived = false;
     echoTimeout = false;
+    gpio_set_level(SWITCHPIN, 1);
     gpio_set_level(TRIGPIN, 1);
     timer_start(TIMER_GROUP_0, TIMER_0);
     while(!echoReceived &&  !echoTimeout){vTaskDelay(1);}
+    gpio_set_level(SWITCHPIN, 0);
     if(echoReceived)
     {
         return distance;
@@ -207,10 +223,18 @@ void app_main() {
     pin_init();
     tim_init();
     wifi_init();
-    while(!networkConnection){};
+    while(!networkConnection){vTaskDelay(1);};
     int dist = getDistance();
-    sendDistance(dist);
-    esp_sleep_enable_timer_wakeup(5*1000000);
+    if(echoTimeout)
+    {
+        ESP_LOGE(TAG, "Echo Timeout");
+    }
+    if(dist != 0)
+    {
+        sendDistance(dist);
+    }
+
+    esp_sleep_enable_timer_wakeup(DEEPSLEEPTIME);
     esp_deep_sleep_start();
 
 }
